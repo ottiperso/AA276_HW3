@@ -38,5 +38,76 @@ def smooth_blending_safety_filter(x, u_nom, gamma, lmbda):
         u_sb:   torch tensor with shape [4]
     """
     # YOUR CODE HERE
-    raise NotImplementedError # REMOVE THIS LINE
+    # raise NotImplementedError # REMOVE THIS LINE
+
+    # control bounds
+    u_upper, u_lower = control_limits()
+    u_upper = u_upper.numpy() # convert to numpy for CVXPY
+    u_lower = u_lower.numpy()
+
+    # batch x for vf stuff / things that expect batched inputs
+    x_batch = x.unsqueeze(0)  # [1, 13]
+    
+    # min value func tracker
+    V_min = float('inf')
+    # its gradient, tracker
+    dVdx_min = None
+    
+    # V, dVdx for all obstacles, get min V
+    for obstacle in obstacles:
+        # x, y, radius of each obstacle
+        o_x, o_y, o_r = obstacle[0].item(), obstacle[1].item(), obstacle[2].item()
+
+        # only p_x and p_y modified, other 11 states unchanged
+        # shift state for new obstacle position (prob 3.1)
+        x_new = x_batch.clone()
+        x_new[0, 0] = x_batch[0, 0] - o_x
+        x_new[0, 1] = x_batch[0, 1] - o_y
+
+        # scale for new obstacle radius (prob 3.2)
+        # ?????
+        x_new[0, 0] = x_new[0, 0] * (0.5 / o_r)
+        x_new[0, 1] = x_new[0, 1] * (0.5 / o_r)
+
+        # query og value func at new state
+        V_obstacle = vf.values(x_new).item()
+        dVdx_obstacle = vf.gradients(x_new)[0].numpy()
+        
+        if V_obstacle < V_min:
+            V_min = V_obstacle
+            dVdx_min = dVdx_obstacle
+    
+    # convert to numpy
+    x_np = x.numpy()
+    u_nom_np = u_nom.numpy()
+
+    # control affine dynamics from prob 1, remove batch dim
+    f_np = f(x_batch)[0].detach().numpy()   # [13]
+    g_np = g(x_batch)[0].detach().numpy()   # [13, 4]
+    
+    # QP vars
+    u_sb = cp.Variable(4) # control input
+    s = cp.Variable(1)  # slack variable
+    
+    # V_dot = dVdx @ (f(x) + g(x)u)
+    # Lie derivatives
+    Lf_V = dVdx_min @ f_np # scalar
+    Lg_V = dVdx_min @ g_np  # [4]
+    
+    # (over u) min ||u - u_nom||^2 + lambda * s^2
+    # stay closest to nominal controller, penalize slack
+    objective = cp.Minimize(cp.sum_squares(u_sb - u_nom_np) + lmbda * cp.sum_squares(s))
+    
+    # constraint: dV/dx * (f + g*u) + gamma*V + s >= 0
+    constraints = [ Lf_V + Lg_V @ u_sb + gamma * V_min + s >= 0,
+                    u_sb <= u_upper,
+                    u_sb >= u_lower,
+                    s >= 0 ]
+    
+    prob = cp.Problem(objective, constraints)
+    prob.solve()
+
+    if u_sb.value is None:
+        return u_nom  # fallback to nominal if QP fails
+
     return torch.tensor(u_sb.value, dtype=torch.float32) # NOTE: ensure you return a float32 tensor
