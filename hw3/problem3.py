@@ -48,7 +48,7 @@ def smooth_blending_safety_filter(x, u_nom, gamma, lmbda):
     # batch x for vf stuff / things that expect batched inputs
     x_batch = x.unsqueeze(0).detach().clone()  # [1, 13]
 
-    # control affine dynamics, keep as torch tensors for later
+    # control affine dynamics
     f_x = f(x_batch).squeeze(0)   # [13]
     g_x = g(x_batch).squeeze(0)   # [13, 4]
 
@@ -71,11 +71,11 @@ def smooth_blending_safety_filter(x, u_nom, gamma, lmbda):
         x_new[0, 7] *= (0.5 / o_r)
         x_new[0, 8] *= (0.5 / o_r)
 
-        # query value function at transformed state
+        # query value function at new state
         V_obstacle = vf.values(x_new).detach().cpu().numpy().item()
-        dVdx_obstacle = vf.gradients(x_new).squeeze(0)  # keep as torch tensor
+        dVdx_obstacle = vf.gradients(x_new).squeeze(0)
 
-        # scale gradient via chain rule (prob 3.2)
+        # scale gradient (chain rule) (prob 3.2)
         dVdx_obstacle[0] *= (0.5 / o_r)
         dVdx_obstacle[1] *= (0.5 / o_r)
         dVdx_obstacle[7] *= (0.5 / o_r)
@@ -88,13 +88,13 @@ def smooth_blending_safety_filter(x, u_nom, gamma, lmbda):
     # convert to numpy
     u_nom_np = u_nom.detach().cpu().numpy()
 
-    # Lie derivatives using torch ops then convert to numpy
+    # Lie derivatives
     Lf_V = (dVdx_min @ f_x).detach().cpu().numpy()  # scalar
     Lg_V = (dVdx_min @ g_x).detach().cpu().numpy()  # [4]
 
     # QP vars
     u_sb = cp.Variable(4)   # control input
-    s = cp.Variable()       # scalar slack variable
+    s = cp.Variable()       # slack var
 
     # min ||u - u_nom||^2 + lambda * s^2
     objective = cp.Minimize(cp.sum_squares(u_sb - u_nom_np) + lmbda * cp.square(s))
