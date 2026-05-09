@@ -65,13 +65,18 @@ def smooth_blending_safety_filter(x, u_nom, gamma, lmbda):
         x_new[0, 1] = x_batch[0, 1] - o_y
 
         # scale for new obstacle radius (prob 3.2)
-        # ?????
-        x_new[0, 0] = x_new[0, 0] * (0.5 / o_r)
-        x_new[0, 1] = x_new[0, 1] * (0.5 / o_r)
+        x_new[0, 0] = x_new[0, 0] * (0.5 / o_r)  # p_x
+        x_new[0, 1] = x_new[0, 1] * (0.5 / o_r)  # p_y
+        x_new[0, 7] = x_new[0, 7] * (0.5 / o_r)  # v_x
+        x_new[0, 8] = x_new[0, 8] * (0.5 / o_r)  # v_y
 
         # query og value func at new state
         V_obstacle = vf.values(x_new).item()
         dVdx_obstacle = vf.gradients(x_new)[0].numpy()
+        dVdx_obstacle[0] *= (0.5 / o_r)  # p_x
+        dVdx_obstacle[1] *= (0.5 / o_r)  # p_y
+        dVdx_obstacle[7] *= (0.5 / o_r)  # v_x
+        dVdx_obstacle[8] *= (0.5 / o_r)  # v_y
         
         if V_obstacle < V_min:
             V_min = V_obstacle
@@ -111,3 +116,4 @@ def smooth_blending_safety_filter(x, u_nom, gamma, lmbda):
         return u_nom  # fallback to nominal if QP fails
 
     return torch.tensor(u_sb.value, dtype=torch.float32) # NOTE: ensure you return a float32 tensor
+
